@@ -249,7 +249,43 @@ def parse_args():
     parser.add_argument(
         "--with_tracking",
         action="store_true",
-        help="Whether to enable experiment trackers for logging.",
+        help="Whether to enable experiment trackers for logging (TensorBoard by default).",
+    )
+    parser.add_argument(
+        "--use_swanlab",
+        action="store_true",
+        help="Log metrics to SwanLab instead of TensorBoard (implies --with_tracking).",
+    )
+    parser.add_argument(
+        "--swanlab_project",
+        type=str,
+        default="DivMoE",
+        help="SwanLab project name.",
+    )
+    parser.add_argument(
+        "--swanlab_run_name",
+        type=str,
+        default=None,
+        help="SwanLab experiment name. Defaults to the output_dir basename.",
+    )
+    parser.add_argument(
+        "--swanlab_workspace",
+        type=str,
+        default=None,
+        help="SwanLab workspace/team name.",
+    )
+    parser.add_argument(
+        "--swanlab_logdir",
+        type=str,
+        default=None,
+        help="Local directory for SwanLab logs. Defaults to <output_dir>/swanlab.",
+    )
+    parser.add_argument(
+        "--swanlab_mode",
+        type=str,
+        default=None,
+        choices=["cloud", "local", "disabled", "offline"],
+        help="SwanLab run mode (cloud/local/offline/disabled).",
     )
     parser.add_argument(
         "--low_cpu_mem_usage",
@@ -445,9 +481,41 @@ def build_dataset(
     return lm_dataset
 
 
+class SwanLabScalarWriter:
+    """Adapter exposing the SummaryWriter.add_scalar/close interface backed by SwanLab."""
+
+    def __init__(self, project, run_name=None, workspace=None, logdir=None, config=None, mode=None):
+        import swanlab
+
+        self._swanlab = swanlab
+        init_kwargs = {"project": project, "config": config or {}}
+        if run_name:
+            init_kwargs["experiment_name"] = run_name
+        if workspace:
+            init_kwargs["workspace"] = workspace
+        if mode:
+            init_kwargs["mode"] = mode
+        if logdir:
+            os.makedirs(logdir, exist_ok=True)
+            init_kwargs["logdir"] = logdir
+            os.environ.setdefault("SWANLAB_SAVE_DIR", logdir)
+        try:
+            swanlab.init(**init_kwargs)
+        except TypeError:
+            init_kwargs.pop("logdir", None)
+            swanlab.init(**init_kwargs)
+
+    def add_scalar(self, tag, value, step):
+        if hasattr(value, "item"):
+            value = value.item()
+        self._swanlab.log({tag: value}, step=step)
+
+    def close(self):
+        self._swanlab.finish()
+
+
 def create_deepspeed_config(args):
     """Create DeepSpeed configuration"""
-    
     # Calculate cosine minimum ratio if min_lr is set
     cos_min_ratio = 0.0
     if args.min_lr is not None and args.learning_rate > 0:
@@ -596,10 +664,24 @@ def main():
         datasets.utils.logging.set_verbosity_error()
         transformers.utils.logging.set_verbosity_error()
 
-    # Setup tensorboard writer
+    # Setup experiment tracker (SwanLab or TensorBoard)
     writer = None
-    if args.with_tracking and is_main_process:
-        writer = SummaryWriter(args.output_dir)
+    if is_main_process:
+        if args.use_swanlab:
+            args.with_tracking = True
+            run_name = args.swanlab_run_name or (os.path.basename(os.path.normpath(args.output_dir)) if args.output_dir else None)
+            logdir = args.swanlab_logdir or (os.path.join(args.output_dir, "swanlab") if args.output_dir else None)
+            writer = SwanLabScalarWriter(
+                project=args.swanlab_project,
+                run_name=run_name,
+                workspace=args.swanlab_workspace,
+                logdir=logdir,
+                config=vars(args),
+                mode=args.swanlab_mode,
+            )
+            logger.info(f"SwanLab tracking enabled: project={args.swanlab_project}, run={run_name}")
+        elif args.with_tracking:
+            writer = SummaryWriter(args.output_dir)
 
     # === Model and Tokenizer ===
     if args.use_divmoe:

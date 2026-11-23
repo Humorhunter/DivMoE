@@ -46,6 +46,10 @@ SAVE_EVERY="${SAVE_EVERY:-500}"
 ZERO_STAGE="${ZERO_STAGE:-2}"
 GRAD_CKPT="${GRAD_CKPT:-0}"                             # 1 to enable gradient checkpointing
 TRACKING="${TRACKING:-0}"                               # 1 to enable tensorboard tracking
+SWANLAB="${SWANLAB:-1}"                                 # 1 to log to SwanLab (implies tracking)
+SWANLAB_PROJECT="${SWANLAB_PROJECT:-DivMoE}"
+SWANLAB_WORKSPACE="${SWANLAB_WORKSPACE:-}"
+SWANLAB_MODE="${SWANLAB_MODE:-}"                        # cloud | local | offline | disabled
 
 # ---- derive grad accumulation and step count ----
 TOKENS_PER_ITER=$(( PER_DEVICE_BATCH * NUM_GPUS * BLOCK_SIZE ))
@@ -61,6 +65,11 @@ MAX_STEPS=$(( (TRAIN_TOKENS + GLOBAL_BATCH_TOKENS - 1) / GLOBAL_BATCH_TOKENS ))
 EXTRA_FLAGS=""
 [[ "$GRAD_CKPT" == "1" ]] && EXTRA_FLAGS="$EXTRA_FLAGS --gradient_checkpointing"
 [[ "$TRACKING" == "1" ]] && EXTRA_FLAGS="$EXTRA_FLAGS --with_tracking"
+if [[ "$SWANLAB" == "1" ]]; then
+  EXTRA_FLAGS="$EXTRA_FLAGS --use_swanlab --swanlab_project $SWANLAB_PROJECT"
+  [[ -n "$SWANLAB_WORKSPACE" ]] && EXTRA_FLAGS="$EXTRA_FLAGS --swanlab_workspace $SWANLAB_WORKSPACE"
+  [[ -n "$SWANLAB_MODE" ]] && EXTRA_FLAGS="$EXTRA_FLAGS --swanlab_mode $SWANLAB_MODE"
+fi
 
 echo "=============================================================="
 echo " Stage 1 dense specialist CPT"
@@ -77,6 +86,7 @@ echo "   max_steps       : $MAX_STEPS  (~$(( TRAIN_TOKENS / 1000000000 ))B token
 echo "   lr/min_lr/warmup: $LR / $MIN_LR / $WARMUP"
 echo "   weight_decay    : $WEIGHT_DECAY"
 echo "   zero_stage      : $ZERO_STAGE"
+echo "   swanlab         : $SWANLAB (project=$SWANLAB_PROJECT)"
 echo "=============================================================="
 
 for domain in $DOMAINS; do

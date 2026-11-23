@@ -79,6 +79,7 @@ Dataset utilities for training:
 - transformers >= 4.40.0
 - datasets
 - flash-attn (optional, for Flash Attention 2 support)
+- swanlab (optional, for experiment tracking)
 
 ## Model Architecture
 
