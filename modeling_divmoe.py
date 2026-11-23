@@ -1431,6 +1431,15 @@ class DivMoEForCausalLM(DivMoEPreTrainedModel, GenerationMixin):
             
             # Initialize experts from domain models
             logger.info("Initializing experts from domain models...")
+            expansion_factor = config.num_domain_groups
+            granularity = num_experts_per_domain
+            expert_scale = (
+                expansion_factor * granularity ** 2 / config.num_experts_per_tok
+            ) ** (1.0 / 3.0)
+            logger.info(
+                f"Applying expert weight scaling gamma={expert_scale:.4f} "
+                f"(E={expansion_factor}, G={granularity}, k={config.num_experts_per_tok})"
+            )
             for layer_idx in range(config.num_hidden_layers):
                 # For each domain group
                 for domain_idx, domain_model in enumerate(domain_models):
@@ -1467,12 +1476,12 @@ class DivMoEForCausalLM(DivMoEPreTrainedModel, GenerationMixin):
                         end_idx = (expert_idx + 1) * split_size
                         
                         # Extract chunk of gate and up projection weights (out_features, in_features)
-                        gate_chunk = source_gate_weight[start_idx:end_idx, :]
-                        up_chunk = source_up_weight[start_idx:end_idx, :]
+                        gate_chunk = source_gate_weight[start_idx:end_idx, :] * expert_scale
+                        up_chunk = source_up_weight[start_idx:end_idx, :] * expert_scale
                         
                         # Extract chunk of down projection weights (in_features, out_features)
                         # For down_proj, we need to slice along the in_features dimension (dim 1)
-                        down_chunk = source_down_weight[:, start_idx:end_idx]
+                        down_chunk = source_down_weight[:, start_idx:end_idx] * expert_scale
                         
                                                 
                         # Verify shapes

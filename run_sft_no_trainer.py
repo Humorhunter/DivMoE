@@ -211,7 +211,7 @@ def parse_args():
         "--overwrite_cache", action="store_true", help="Overwrite the cached training and evaluation sets"
     )
     parser.add_argument(
-        "--use_tulu_dataset", action="store_true", default=True,
+        "--use_tulu_dataset", action="store_true", default=False,
         help="Use the Tulu dataset for SFT training."
     )
     parser.add_argument("--push_to_hub", action="store_true", help="Whether or not to push the model to the Hub.")
@@ -290,8 +290,8 @@ def parse_args():
     args = parser.parse_args()
 
     # Sanity checks
-    if args.dataset_name is None and args.validation_file is None and not args.use_tulu_dataset:
-        raise ValueError("Need either a dataset name, a validation file, or enable Tulu dataset.")
+    if args.sft_cache_path is None and args.dataset_name is None and args.validation_file is None and not args.use_tulu_dataset:
+        raise ValueError("Need either --sft_cache_path, --dataset_name, --validation_file, or --use_tulu_dataset.")
     else:
         if args.validation_file is not None:
             extension = args.validation_file.split(".")[-1]
@@ -309,7 +309,7 @@ def parse_args():
         if args.model_name_or_path is None:
             raise ValueError("--model_name_or_path must be provided as the base model when using DivMoE.")
         
-        AutoConfig.register("divmoe", DivMoEConfig)
+        AutoConfig.register("divmoe", DivMoEConfig, exist_ok=True)
     
     # Validate distillation related arguments
     if args.distillation:

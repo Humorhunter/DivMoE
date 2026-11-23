@@ -264,6 +264,7 @@ def cache_sft_dataset(tokenizer_name_or_path, cache_to_disk_path):
 
 
 if __name__ == "__main__":
+    pass
     # import sys
     
     # if len(sys.argv) > 1:

@@ -146,9 +146,9 @@ def load_tulu_dataset(
         random.seed(seed)
     
     # Load dataset from Hugging Face
+    tulu_path = os.environ.get("TULU_DATASET_PATH", "allenai/tulu-3-sft-mixture")
     tulu_dataset = load_dataset(
-        # "allenai/tulu-3-sft-mixture",
-        "/path/to/tulu-3-sft-mixture",
+        tulu_path,
         split=split,
         streaming=streaming,
     )

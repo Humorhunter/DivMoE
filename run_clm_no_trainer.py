@@ -47,9 +47,7 @@ from datasets import load_dataset, DatasetDict
 from huggingface_hub import HfApi
 
 # Import the OLMoE dataset loader
-from prepare_data.olmoe_dataset import load_olmoe_mix_dataset
-from prepare_data.olmoe_dataset_improved import load_improved_olmoe_mix_dataset
-from prepare_data.olmoe_dataset_fixed import load_fixed_olmoe_mix_dataset
+from prepare_data.olmoe_dataset import load_fixed_olmoe_mix_dataset
 
 import transformers
 from transformers import (
@@ -315,6 +313,12 @@ def parse_args():
             if extension not in ["csv", "json", "txt"]:
                 raise ValueError("`train_file` should be a csv, json or txt file.")
 
+    if args.max_train_steps is None:
+        raise ValueError("--max_train_steps must be provided because the streaming OLMoE dataset has no known length.")
+
+    if args.olmoe_data_dir is None:
+        raise ValueError("--olmoe_data_dir is required; this training script only supports the OLMoE-mix loader.")
+
     if args.push_to_hub:
         if args.output_dir is None:
             raise ValueError("Need an `output_dir` to create a repo when `--push_to_hub` is passed.")
@@ -326,7 +330,7 @@ def parse_args():
         if args.model_name_or_path is None:
             raise ValueError("--model_name_or_path must be provided as the base model when using DivMoE.")
         
-        AutoConfig.register("divmoe", DivMoEConfig)
+        AutoConfig.register("divmoe", DivMoEConfig, exist_ok=True)
 
     # Validate distillation related arguments
     if args.distillation:
@@ -750,49 +754,41 @@ def main():
     # === Datasets ===
     logger.info(f"Loading OLMoE dataset from {args.olmoe_data_dir} using {args.dataset_implementation} implementation")
     
-    if args.dataset_implementation == "original":
-        raw_train_dataset = load_olmoe_mix_dataset(
-            args.olmoe_data_dir, 
-            seed=args.seed,
-            buffer_size=100_000,
+    if args.dataset_implementation != "fixed":
+        logger.warning(
+            f"Dataset implementation '{args.dataset_implementation}' is not included in this release; "
+            "falling back to the fixed OLMoE-mix loader."
         )
-    elif args.dataset_implementation == "improved":
-        raw_train_dataset = load_improved_olmoe_mix_dataset(
-            args.olmoe_data_dir, 
-            seed=args.seed,
-            global_step=completed_steps,
-            buffer_size=50_000,
-        )
-    elif args.dataset_implementation == "fixed":
-        raw_train_dataset = load_fixed_olmoe_mix_dataset(
-            args.olmoe_data_dir, 
-            seed=args.seed,
-            global_step=completed_steps,
-            buffer_size=100_000,  # Back to larger buffer for better mixing
-        )
-    else:
-        raise ValueError(f"Unknown dataset implementation: {args.dataset_implementation}")
-    logger.info(f"Loading separate validation file from {args.validation_file}")
-    raw_eval_dataset = load_dataset(args.validation_file, split='validation', streaming=True)
+    raw_train_dataset = load_fixed_olmoe_mix_dataset(
+        args.olmoe_data_dir,
+        seed=args.seed,
+        global_step=completed_steps,
+        buffer_size=100_000,
+    )
 
     train_dataset = build_dataset(raw_train_dataset['train'], tokenizer, block_size=args.block_size, logger=logger, is_main_process=is_main_process)
-    validation_dataset = build_dataset(raw_eval_dataset, tokenizer, block_size=args.block_size, logger=logger, is_main_process=is_main_process)
-
     train_dataloader = DataLoader(
         train_dataset,
         collate_fn=default_data_collator,
         batch_size=args.per_device_train_batch_size,
     )
-    validation_dataloader = DataLoader(
-        validation_dataset,
-        collate_fn=default_data_collator,
-        batch_size=args.per_device_eval_batch_size,
-    )
+
+    validation_dataloader = None
+    if args.validation_file is not None:
+        logger.info(f"Loading separate validation file from {args.validation_file}")
+        raw_eval_dataset = load_dataset(args.validation_file, split='validation', streaming=True)
+        validation_dataset = build_dataset(raw_eval_dataset, tokenizer, block_size=args.block_size, logger=logger, is_main_process=is_main_process)
+        validation_dataloader = DataLoader(
+            validation_dataset,
+            collate_fn=default_data_collator,
+            batch_size=args.per_device_eval_batch_size,
+        )
 
     from accelerate import Accelerator
     accelerator = Accelerator()
     train_dataloader = accelerator.prepare(train_dataloader)
-    validation_dataloader = accelerator.prepare(validation_dataloader)
+    if validation_dataloader is not None:
+        validation_dataloader = accelerator.prepare(validation_dataloader)
 
     # Log first few batches for debugging
     for idx, batch in enumerate(train_dataloader):
@@ -898,13 +894,14 @@ def main():
                     model_dir = os.path.join(args.output_dir, f"model-{completed_steps}")
                     save_model_and_tokenizer(model, tokenizer, model_dir, is_main_process, args, completed_steps)
 
-                if completed_steps % args.evaluate_every == 0:
+                if validation_dataloader is not None and completed_steps % args.evaluate_every == 0:
                     evaluate(model, validation_dataloader, completed_steps, writer, is_main_process, teacher_model, args)
                     model.train()
 
     # === Final Evaluation ===
-    logger.info("***** Running Final Evaluation *****")
-    evaluate(model, validation_dataloader, completed_steps, writer, is_main_process, teacher_model, args)
+    if validation_dataloader is not None:
+        logger.info("***** Running Final Evaluation *****")
+        evaluate(model, validation_dataloader, completed_steps, writer, is_main_process, teacher_model, args)
 
     # === Save Final Model ===
     alloc, max_alloc, reserved, max_reserved = get_memory_stats()

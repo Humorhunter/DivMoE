@@ -46,7 +46,7 @@ def parse_args():
     parser.add_argument(
         "--experts_per_domain",
         type=int,
-        default=4,
+        default=2,
         help="Number of experts to create from each domain model"
     )
     
@@ -117,6 +117,14 @@ def setup_logging(verbose: bool):
 def create_and_save_divmoe(args):
     """Create a DivMoE model from domain-specialized models and save it."""
     
+    all_paths = [args.base_model_path, args.output_dir, *args.domain_model_paths]
+    placeholder_paths = [p for p in all_paths if p.startswith("/path/to")]
+    if placeholder_paths:
+        raise ValueError(
+            f"Placeholder paths detected: {placeholder_paths}. "
+            "Replace /path/to/... with real model and output paths."
+        )
+
     # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
     

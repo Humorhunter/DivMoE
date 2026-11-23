@@ -12,7 +12,7 @@ supplementary_code/
 ├── run_clm_no_trainer.py           # Continuous pre-training script
 ├── run_sft_no_trainer.py           # Supervised fine-tuning script
 ├── utils.py                        # Utility functions
-└── data/
+└── prepare_data/
     ├── olmoe_dataset.py            # OLMoE-mix dataset loader for pre-training
     ├── sft_dataset.py              # SFT dataset processing utilities
     ├── nemotron_sft_dataset.py     # Nemotron-style SFT dataset with sequence packing
@@ -65,7 +65,7 @@ Utility functions for:
 - Model registration with HuggingFace Auto classes
 - Parameter counting and expert statistics
 
-### 6. `data/`
+### 6. `prepare_data/`
 Dataset utilities for training:
 - `olmoe_dataset.py`: OLMoE-mix dataset loader for continuous pre-training
 - `sft_dataset.py`: Basic SFT dataset with conversation tokenization and loss masking
