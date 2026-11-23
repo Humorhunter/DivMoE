@@ -60,7 +60,16 @@ from transformers import (
     default_data_collator,
     get_scheduler,
 )
-from transformers.utils import check_min_version, send_example_telemetry
+try:
+    from transformers.utils import check_min_version
+except ImportError:  # pragma: no cover - removed in newer transformers
+    def check_min_version(*args, **kwargs):
+        pass
+try:
+    from transformers.utils import send_example_telemetry
+except ImportError:  # removed in newer transformers; unused by this script
+    def send_example_telemetry(*args, **kwargs):
+        pass
 from transformers.utils.versions import require_version
 
 # Import local DivMoE model for training
