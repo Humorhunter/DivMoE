@@ -62,7 +62,7 @@ class FixedOLMoEExamplesIterable(ExamplesIterable):
         seed: Optional[int] = None,
         global_step: int = 0
     ):
-        super().__init__(iter([]), features)
+        super().__init__(self._generate_examples, features)
         self.base_dir = base_dir
         self.buffer_size = buffer_size
         self.source_props = source_props
@@ -294,6 +294,13 @@ class FixedOLMoEExamplesIterable(ExamplesIterable):
         except Exception as e:
             logger.warning(f"Error reading file {filepath}: {str(e)}")
             return
+
+    def _generate_examples(self, **kwargs):
+        """Callable entry point required by datasets.ExamplesIterable."""
+        worker_info = get_worker_info()
+        worker_id = worker_info.id if worker_info else None
+        num_workers = worker_info.num_workers if worker_info else None
+        yield from self._get_iterator_for_worker(worker_id, num_workers)
 
     def __iter__(self):
         """Return worker-aware iterator"""
