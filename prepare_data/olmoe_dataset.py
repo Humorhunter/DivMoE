@@ -36,6 +36,20 @@ _DESCRIPTION = """
 Fixed OLMoE Mix dataset with stable training behavior and good mixing properties.
 """
 
+JSON_SUFFIXES = (".json", ".jsonl", ".json.gz", ".jsonl.gz", ".json.zst", ".jsonl.zst")
+JSON_GLOBS = ("*.json", "*.jsonl", "*.json.gz", "*.jsonl.gz", "*.json.zst", "*.jsonl.zst")
+
+
+def _count_json_files(root: str, sources) -> int:
+    """Count shard files under root/<source>/ for the given source names."""
+    total = 0
+    for source in sources:
+        source_dir = os.path.join(root, source)
+        for pattern in JSON_GLOBS:
+            total += len(glob.glob(os.path.join(source_dir, "**", pattern), recursive=True))
+    return total
+
+
 class FixedOLMoEExamplesIterable(ExamplesIterable):
     """Fixed ExamplesIterable that addresses training instability issues"""
     
@@ -61,7 +75,7 @@ class FixedOLMoEExamplesIterable(ExamplesIterable):
         for source in self.source_props.keys():
             source_dir = os.path.join(self.base_dir, source)
             files = []
-            for pattern in ("*.json", "*.jsonl", "*.json.gz", "*.jsonl.gz", "*.json.zst", "*.jsonl.zst"):
+            for pattern in JSON_GLOBS:
                 files.extend(glob.glob(os.path.join(source_dir, "**", pattern), recursive=True))
             files = sorted(set(files))
             if files:
@@ -324,6 +338,17 @@ class FixedProportionalMixIterableDataset(IterableDataset):
             source_props = {k: float(v) / total for k, v in source_props.items()}
             logger.info(f"Loaded source proportions from {config_path}: {source_props}")
         else:
+            # The OLMoE-Mix shards are often stored under <base_dir>/data/<source>/.
+            # Pick whichever of <base_dir> or <base_dir>/data actually holds the most shards.
+            candidates = [base_dir, os.path.join(base_dir, "data")]
+            counts = {c: _count_json_files(c, source_props) for c in candidates}
+            best_root = max(counts, key=counts.get)
+            if counts[best_root] == 0:
+                best_root = base_dir
+            if best_root != base_dir:
+                logger.info(f"No usable shards directly under {base_dir}; using nested directory {best_root}")
+            base_dir = best_root
+
             discovered = [
                 d for d in os.listdir(base_dir)
                 if os.path.isdir(os.path.join(base_dir, d))
