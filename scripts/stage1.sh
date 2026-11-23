@@ -35,6 +35,7 @@ DOMAINS="${DOMAINS:-math code academic web}"
 NUM_GPUS="${NUM_GPUS:-8}"
 PER_DEVICE_BATCH="${PER_DEVICE_BATCH:-16}"
 BLOCK_SIZE="${BLOCK_SIZE:-4096}"
+DL_WORKERS="${DL_WORKERS:-4}"                           # dataloader subprocesses (>0 parallelizes shard reading)
 GLOBAL_BATCH_TOKENS="${GLOBAL_BATCH_TOKENS:-2097152}"   # ~2M tokens/step (paper)
 TRAIN_TOKENS="${TRAIN_TOKENS:-10000000000}"             # 10B tokens per domain (paper)
 
@@ -81,6 +82,7 @@ echo "   num_gpus        : $NUM_GPUS"
 echo "   per_device_batch: $PER_DEVICE_BATCH"
 echo "   grad_accum      : $GRAD_ACCUM"
 echo "   block_size      : $BLOCK_SIZE"
+echo "   dataloader_workers: $DL_WORKERS"
 echo "   global batch    : $GLOBAL_BATCH_TOKENS tokens/step ($(( GLOBAL_BATCH_TOKENS / BLOCK_SIZE )) sequences)"
 echo "   max_steps       : $MAX_STEPS  (~$(( TRAIN_TOKENS / 1000000000 ))B tokens/domain)"
 echo "   lr/min_lr/warmup: $LR / $MIN_LR / $WARMUP"
@@ -98,6 +100,7 @@ for domain in $DOMAINS; do
     --olmoe_data_dir "$DATA_ROOT/stage1/$domain" \
     --output_dir "$OUT_ROOT/stage1_$domain" \
     --block_size "$BLOCK_SIZE" \
+    --dataloader_num_workers "$DL_WORKERS" \
     --per_device_train_batch_size "$PER_DEVICE_BATCH" \
     --gradient_accumulation_steps "$GRAD_ACCUM" \
     --learning_rate "$LR" \

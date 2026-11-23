@@ -65,6 +65,12 @@ class FixedOLMoEExamplesIterable(ExamplesIterable):
                 files.extend(glob.glob(os.path.join(source_dir, "**", pattern), recursive=True))
             files = sorted(set(files))
             if files:
+                readable = [f for f in files if self._file_yields_data(f)]
+                skipped = len(files) - len(readable)
+                if skipped:
+                    logger.warning(f"Skipped {skipped} unreadable/empty file(s) for source '{source}'")
+                files = readable
+            if files:
                 self.source_files[source] = files
                 logger.info(f"Found {len(files)} files for source '{source}'")
             else:
@@ -173,15 +179,28 @@ class FixedOLMoEExamplesIterable(ExamplesIterable):
                 self._example_idx += 1
                 yield key, example
 
+    def _iter_file(self, filepath: str) -> Iterator[Dict[str, Any]]:
+        """Dispatch to the right reader based on file extension."""
+        if filepath.endswith(('.json.zst', '.jsonl.zst')):
+            yield from self._read_zst_file(filepath)
+        elif filepath.endswith(('.json.gz', '.jsonl.gz')):
+            yield from self._read_gz_file(filepath)
+        elif filepath.endswith(('.json', '.jsonl')):
+            yield from self._read_json_file(filepath)
+
+    def _file_yields_data(self, filepath: str) -> bool:
+        """Cheaply check whether a file yields at least one parseable example."""
+        try:
+            for _ in self._iter_file(filepath):
+                return True
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Error probing file {filepath}: {e}")
+        return False
+
     def _create_file_iterator(self, files: List[str]) -> Iterator[Dict[str, Any]]:
         """Create an iterator over files"""
         for file in cycle(files):  # Use cycle for infinite iteration
-            if file.endswith(('.json.zst', '.jsonl.zst')):
-                yield from self._read_zst_file(file)
-            elif file.endswith(('.json.gz', '.jsonl.gz')):
-                yield from self._read_gz_file(file)
-            elif file.endswith(('.json', '.jsonl')):
-                yield from self._read_json_file(file)
+            yield from self._iter_file(file)
     
     def _read_json_file(self, filepath: str) -> Iterator[Dict[str, Any]]:
         """Read a plain-text JSON Lines file"""

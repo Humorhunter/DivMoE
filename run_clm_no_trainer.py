@@ -217,6 +217,13 @@ def parse_args():
         help="The number of processes to use for the preprocessing.",
     )
     parser.add_argument(
+        "--dataloader_num_workers",
+        type=int,
+        default=0,
+        help="Number of subprocesses for data loading. The OLMoE loader reads and "
+             "tokenizes gzip/JSONL shards in Python; set >0 (e.g. 8) to parallelize across CPU cores.",
+    )
+    parser.add_argument(
         "--overwrite_cache", action="store_true", help="Overwrite the cached training and evaluation sets"
     )
     parser.add_argument(
@@ -862,6 +869,7 @@ def main():
         train_dataset,
         collate_fn=default_data_collator,
         batch_size=args.per_device_train_batch_size,
+        num_workers=args.dataloader_num_workers,
     )
 
     validation_dataloader = None
@@ -873,6 +881,7 @@ def main():
             validation_dataset,
             collate_fn=default_data_collator,
             batch_size=args.per_device_eval_batch_size,
+            num_workers=args.dataloader_num_workers,
         )
 
     from accelerate import Accelerator
