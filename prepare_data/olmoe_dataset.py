@@ -76,10 +76,16 @@ class FixedOLMoEExamplesIterable(ExamplesIterable):
             else:
                 logger.warning(f"No files found for source '{source}' in {source_dir}")
         if not self.source_files:
+            nested = [d for d in os.listdir(self.base_dir)
+                      if os.path.isdir(os.path.join(self.base_dir, d))] if os.path.isdir(self.base_dir) else []
+            hint = ""
+            if "data" in nested:
+                hint = (f" Hint: OLMoE-Mix shards are often under '{self.base_dir}/data/<source>/', "
+                        f"try passing that 'data' directory as --olmoe_data_dir.")
             raise ValueError(
                 f"No .json/.jsonl(.gz/.zst) files found under {self.base_dir}. "
                 f"Expected subdirectories {sorted(self.source_props)} or a source_props.json "
-                f"describing the subdirectories to use."
+                f"describing the subdirectories to use.{hint}"
             )
     
     def _get_iterator_for_worker(

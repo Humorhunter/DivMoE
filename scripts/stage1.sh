@@ -29,6 +29,7 @@ cd "$REPO_ROOT"
 # ---- configurable knobs (override via env) ----
 BASE="${BASE:-$HOME/models/Qwen3-0.6B-Base}"
 DATA_ROOT="${DATA_ROOT:-/data/DivMoE/data}"
+DATA_SUBDIR="${DATA_SUBDIR:-data}"                      # OLMoE-mix shards live under <domain>/data/<source>/
 OUT_ROOT="${OUT_ROOT:-$HOME/DivMoE/output}"
 DOMAINS="${DOMAINS:-math code academic web}"
 
@@ -75,7 +76,7 @@ fi
 echo "=============================================================="
 echo " Stage 1 dense specialist CPT"
 echo "   base            : $BASE"
-echo "   data root       : $DATA_ROOT/stage1/<domain>"
+echo "   data root       : $DATA_ROOT/stage1/<domain>/${DATA_SUBDIR:-}"
 echo "   output root     : $OUT_ROOT/stage1_<domain>"
 echo "   domains         : $DOMAINS"
 echo "   num_gpus        : $NUM_GPUS"
@@ -95,9 +96,12 @@ for domain in $DOMAINS; do
   echo ""
   echo ">>> [Stage 1] domain=$domain"
 
+  DATA_DIR="$DATA_ROOT/stage1/$domain"
+  [[ -n "$DATA_SUBDIR" ]] && DATA_DIR="$DATA_DIR/$DATA_SUBDIR"
+
   deepspeed --num_gpus "$NUM_GPUS" run_clm_no_trainer.py \
     --model_name_or_path "$BASE" \
-    --olmoe_data_dir "$DATA_ROOT/stage1/$domain" \
+    --olmoe_data_dir "$DATA_DIR" \
     --output_dir "$OUT_ROOT/stage1_$domain" \
     --block_size "$BLOCK_SIZE" \
     --dataloader_num_workers "$DL_WORKERS" \

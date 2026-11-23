@@ -195,8 +195,17 @@ def download_files(repo, source, files, budget, out_dir, bytes_per_token):
     print(f"[{source}] downloading {len(picked)}/{len(files)} shards "
           f"(~{est_tokens / G:.2f}B tokens, {used / G:.2f}GB) -> {out_dir}/{source}",
           file=sys.stderr)
+    import shutil
+
+    dest_dir = os.path.join(out_dir, source)
+    os.makedirs(dest_dir, exist_ok=True)
     for path in picked:
-        hf_hub_download(repo_id=repo, filename=path, repo_type="dataset", local_dir=out_dir)
+        local_path = hf_hub_download(repo_id=repo, filename=path, repo_type="dataset", local_dir=out_dir)
+        # Flatten the repo's "data/" (or any) prefix so files land in <out_dir>/<source>/,
+        # which is exactly what prepare_data/olmoe_dataset.py globs.
+        dest_path = os.path.join(dest_dir, os.path.basename(path))
+        if os.path.abspath(local_path) != os.path.abspath(dest_path):
+            shutil.move(local_path, dest_path)
     return est_tokens
 
 
