@@ -304,6 +304,14 @@ def parse_args():
         help="SwanLab run mode (cloud/local/offline/disabled).",
     )
     parser.add_argument(
+        "--attn_implementation",
+        type=str,
+        default="auto",
+        choices=["auto", "flash_attention_2", "sdpa", "eager"],
+        help="Attention backend. 'auto' uses flash_attention_2 if installed, else sdpa. "
+             "'eager' is slow and memory-hungry; avoid on long sequences.",
+    )
+    parser.add_argument(
         "--low_cpu_mem_usage",
         action="store_true",
         help=(
@@ -447,7 +455,9 @@ def build_dataset(
     text_column_name = "text" if "text" in column_names else column_names[0]
 
     def tokenize_function(examples):
-        return tokenizer(examples[text_column_name])
+        max_len = block_size if block_size is not None else tokenizer.model_max_length
+        max_len = min(max_len, tokenizer.model_max_length)
+        return tokenizer(examples[text_column_name], truncation=True, max_length=max_len)
 
     if is_main_process:
         tokenized_dataset = raw_dataset.map(
@@ -528,6 +538,19 @@ class SwanLabScalarWriter:
 
     def close(self):
         self._swanlab.finish()
+
+
+def _resolve_attn_impl(choice: str) -> str:
+    """Resolve 'auto' to flash_attention_2 when available, otherwise sdpa."""
+    if choice != "auto":
+        return choice
+    try:
+        from transformers.utils import is_flash_attn_2_available
+        if is_flash_attn_2_available():
+            return "flash_attention_2"
+    except Exception:  # noqa: BLE001
+        pass
+    return "sdpa"
 
 
 def create_deepspeed_config(args):
@@ -700,6 +723,8 @@ def main():
             writer = SummaryWriter(args.output_dir)
 
     # === Model and Tokenizer ===
+    attn_impl = _resolve_attn_impl(args.attn_implementation)
+    logger.info(f"Using attention implementation: {attn_impl}")
     if args.use_divmoe:
         # Check if DivMoE is available
         if 'DivMoEForCausalLM' not in globals():
@@ -711,7 +736,7 @@ def main():
         logger.info(f"Initializing DivMoE model from {args.model_name_or_path}")
         model = DivMoEForCausalLM.from_pretrained(
             args.model_name_or_path, 
-            attn_implementation="flash_attention_2",
+            attn_implementation=attn_impl,
             torch_dtype=torch.bfloat16,
             low_cpu_mem_usage=True,  # Enable this
             trust_remote_code=args.trust_remote_code,
@@ -724,6 +749,7 @@ def main():
             low_cpu_mem_usage=True,  # Enable this
             trust_remote_code=args.trust_remote_code,
             torch_dtype=torch.bfloat16,
+            attn_implementation=attn_impl,
         )
     else:
         raise ValueError(

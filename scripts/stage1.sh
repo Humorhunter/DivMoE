@@ -34,7 +34,7 @@ OUT_ROOT="${OUT_ROOT:-$HOME/DivMoE/output}"
 DOMAINS="${DOMAINS:-math code academic web}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
-PER_DEVICE_BATCH="${PER_DEVICE_BATCH:-16}"
+PER_DEVICE_BATCH="${PER_DEVICE_BATCH:-8}"
 BLOCK_SIZE="${BLOCK_SIZE:-4096}"
 DL_WORKERS="${DL_WORKERS:-4}"                           # dataloader subprocesses (>0 parallelizes shard reading)
 GLOBAL_BATCH_TOKENS="${GLOBAL_BATCH_TOKENS:-2097152}"   # ~2M tokens/step (paper)
@@ -46,7 +46,7 @@ WARMUP="${WARMUP:-50}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-0.1}"
 SAVE_EVERY="${SAVE_EVERY:-500}"
 ZERO_STAGE="${ZERO_STAGE:-2}"
-GRAD_CKPT="${GRAD_CKPT:-0}"                             # 1 to enable gradient checkpointing
+GRAD_CKPT="${GRAD_CKPT:-1}"                             # 1 to enable gradient checkpointing (saves GPU mem)
 TRACKING="${TRACKING:-0}"                               # 1 to enable tensorboard tracking
 SWANLAB="${SWANLAB:-1}"                                 # 1 to log to SwanLab (implies tracking)
 SWANLAB_PROJECT="${SWANLAB_PROJECT:-DivMoE}"
