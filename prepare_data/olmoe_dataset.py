@@ -60,12 +60,21 @@ class FixedOLMoEExamplesIterable(ExamplesIterable):
         self.source_files = {}
         for source in self.source_props.keys():
             source_dir = os.path.join(self.base_dir, source)
-            files = glob.glob(os.path.join(source_dir, "**/*.json.*"), recursive=True)
+            files = []
+            for pattern in ("*.json", "*.jsonl", "*.json.gz", "*.jsonl.gz", "*.json.zst", "*.jsonl.zst"):
+                files.extend(glob.glob(os.path.join(source_dir, "**", pattern), recursive=True))
+            files = sorted(set(files))
             if files:
                 self.source_files[source] = files
                 logger.info(f"Found {len(files)} files for source '{source}'")
             else:
                 logger.warning(f"No files found for source '{source}' in {source_dir}")
+        if not self.source_files:
+            raise ValueError(
+                f"No .json/.jsonl(.gz/.zst) files found under {self.base_dir}. "
+                f"Expected subdirectories {sorted(self.source_props)} or a source_props.json "
+                f"describing the subdirectories to use."
+            )
     
     def _get_iterator_for_worker(
         self,
@@ -103,7 +112,8 @@ class FixedOLMoEExamplesIterable(ExamplesIterable):
         
         # Initialize simple deterministic source selection (no complex mixer)
         sources = list(worker_source_files.keys())
-        weights = [self.source_props[s] for s in sources]
+        weights = np.array([self.source_props[s] for s in sources], dtype=np.float64)
+        weights = weights / weights.sum()
         
         # Pre-compute a stable sequence of source selections
         source_rng = np.random.RandomState(worker_seed)
@@ -166,10 +176,35 @@ class FixedOLMoEExamplesIterable(ExamplesIterable):
     def _create_file_iterator(self, files: List[str]) -> Iterator[Dict[str, Any]]:
         """Create an iterator over files"""
         for file in cycle(files):  # Use cycle for infinite iteration
-            if file.endswith('.json.zst'):
+            if file.endswith(('.json.zst', '.jsonl.zst')):
                 yield from self._read_zst_file(file)
-            elif file.endswith('.json.gz'):
+            elif file.endswith(('.json.gz', '.jsonl.gz')):
                 yield from self._read_gz_file(file)
+            elif file.endswith(('.json', '.jsonl')):
+                yield from self._read_json_file(file)
+    
+    def _read_json_file(self, filepath: str) -> Iterator[Dict[str, Any]]:
+        """Read a plain-text JSON Lines file"""
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        try:
+                            example = json.loads(line)
+                            if "text" not in example and "content" in example:
+                                example["text"] = example["content"]
+                            if "id" not in example:
+                                example["id"] = ""
+                            if "added" not in example:
+                                example["added"] = ""
+                            if "created" not in example:
+                                example["created"] = ""
+                            yield example
+                        except json.JSONDecodeError:
+                            continue
+        except Exception as e:
+            logger.warning(f"Error reading file {filepath}: {str(e)}")
+            return
     
     def _read_zst_file(self, filepath: str) -> Iterator[Dict[str, Any]]:
         """Read a zstandard compressed JSON file"""
@@ -245,7 +280,8 @@ class FixedProportionalMixIterableDataset(IterableDataset):
         seed: Optional[int] = None,
         global_step: int = 0
     ):
-        # Source proportions based on OLMoE paper
+        # Source proportions. A source_props.json inside base_dir overrides the
+        # defaults, which lets you use Dolmino or custom domain directories.
         source_props = {
             "dclm": 0.40,
             "starcoder": 0.15,
@@ -254,6 +290,25 @@ class FixedProportionalMixIterableDataset(IterableDataset):
             "open-web-math": 0.10,
             "wiki": 0.10
         }
+
+        config_path = os.path.join(base_dir, "source_props.json")
+        if os.path.isfile(config_path):
+            with open(config_path, "r") as f:
+                source_props = json.load(f)
+            total = float(sum(source_props.values()))
+            source_props = {k: float(v) / total for k, v in source_props.items()}
+            logger.info(f"Loaded source proportions from {config_path}: {source_props}")
+        else:
+            discovered = [
+                d for d in os.listdir(base_dir)
+                if os.path.isdir(os.path.join(base_dir, d))
+            ] if os.path.isdir(base_dir) else []
+            present = {k: v for k, v in source_props.items() if k in discovered}
+            if present:
+                source_props = present
+            elif discovered:
+                source_props = {d: 1.0 / len(discovered) for d in discovered}
+                logger.info(f"No known source dirs; using all subdirectories: {sorted(source_props)}")
         
         features = Features({
             "text": Value("string"),

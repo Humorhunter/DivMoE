@@ -1,4 +1,5 @@
 output/
+info.md
 
 # Python bytecode / caches
 __pycache__/
