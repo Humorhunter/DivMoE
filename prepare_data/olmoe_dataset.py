@@ -167,11 +167,11 @@ class FixedOLMoEExamplesIterable(ExamplesIterable):
             if source not in source_iterators:
                 continue
                 
-            # Fill buffer if needed
-            if len(buffers[source]) < 1:
+            # Sliding shuffle buffer: refill to `buffer_size` once it drops below half.
+            target = max(1, int(self.buffer_size))
+            if len(buffers[source]) < max(1, target // 2):
                 try:
-                    # Fill buffer with multiple items at once
-                    for _ in range(min(self.buffer_size // 10, 1000)):  # Fill chunk by chunk
+                    while len(buffers[source]) < target:
                         try:
                             item = next(source_iterators[source])
                             item["source"] = source
@@ -183,12 +183,12 @@ class FixedOLMoEExamplesIterable(ExamplesIterable):
                             file_rng.shuffle(files)
                             source_iterators[source] = self._create_file_iterator(files)
                             break
-                    
+
                     # Shuffle buffer for better mixing
                     if buffers[source]:
                         buffer_rng = np.random.RandomState(worker_seed + self._example_idx)
                         buffer_rng.shuffle(buffers[source])
-                    
+
                 except Exception as e:
                     logger.warning(f"Error filling buffer for source {source}: {e}")
                     continue

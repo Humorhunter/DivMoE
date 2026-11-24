@@ -224,6 +224,20 @@ def parse_args():
              "tokenizes gzip/JSONL shards in Python; set >0 (e.g. 8) to parallelize across CPU cores.",
     )
     parser.add_argument(
+        "--shuffle_buffer_size",
+        type=int,
+        default=10000,
+        help="Per-source, per-worker shuffle buffer size (number of documents). "
+             "Larger = better mixing but more host RAM. Set 0 to disable buffering.",
+    )
+    parser.add_argument(
+        "--preprocessing_batch_size",
+        type=int,
+        default=1000,
+        help="Batch size for the streaming tokenize/group_texts map steps. Lower it if "
+             "host RAM spikes when packing very long documents.",
+    )
+    parser.add_argument(
         "--overwrite_cache", action="store_true", help="Overwrite the cached training and evaluation sets"
     )
     parser.add_argument(
@@ -447,6 +461,7 @@ def compute_distillation_loss(student_logits, teacher_logits, temperature=2.0):
 
 def build_dataset(
     raw_dataset, tokenizer, block_size=4*1024, logger=None, is_main_process=True,
+    preprocessing_batch_size=1000,
 ):
     #################
     # Preprocessing the datasets.
@@ -454,23 +469,26 @@ def build_dataset(
     column_names = raw_dataset.column_names
     text_column_name = "text" if "text" in column_names else column_names[0]
 
-    def tokenize_function(examples):
-        max_len = block_size if block_size is not None else tokenizer.model_max_length
-        max_len = min(max_len, tokenizer.model_max_length)
-        return tokenizer(examples[text_column_name], truncation=True, max_length=max_len)
+    eos_token_id = tokenizer.eos_token_id
 
-    if is_main_process:
-        tokenized_dataset = raw_dataset.map(
-            tokenize_function,
-            batched=True,
-            remove_columns=column_names,
-        )
-    else:
-        tokenized_dataset = raw_dataset.map(
-            tokenize_function,
-            batched=True,
-            remove_columns=column_names,
-        )
+    def tokenize_function(examples):
+        # Full-document tokenization (no per-document truncation). Documents are
+        # later packed into block_size chunks by group_texts, matching the paper's
+        # "next-token-prediction on full sequences" recipe. An EOS is appended to
+        # each document so packing keeps a document boundary signal.
+        tokenized = tokenizer(examples[text_column_name])
+        if eos_token_id is not None:
+            tokenized["input_ids"] = [ids + [eos_token_id] for ids in tokenized["input_ids"]]
+            if "attention_mask" in tokenized:
+                tokenized["attention_mask"] = [mask + [1] for mask in tokenized["attention_mask"]]
+        return tokenized
+
+    tokenized_dataset = raw_dataset.map(
+        tokenize_function,
+        batched=True,
+        remove_columns=column_names,
+        batch_size=preprocessing_batch_size,
+    )
 
     # 2. Padding to max length    
     if block_size is None:
@@ -502,6 +520,7 @@ def build_dataset(
     lm_dataset = tokenized_dataset.map(
         group_texts,
         batched=True,
+        batch_size=preprocessing_batch_size,
     )
 
     return lm_dataset
@@ -887,10 +906,10 @@ def main():
         args.olmoe_data_dir,
         seed=args.seed,
         global_step=completed_steps,
-        buffer_size=100_000,
+        buffer_size=args.shuffle_buffer_size,
     )
 
-    train_dataset = build_dataset(raw_train_dataset['train'], tokenizer, block_size=args.block_size, logger=logger, is_main_process=is_main_process)
+    train_dataset = build_dataset(raw_train_dataset['train'], tokenizer, block_size=args.block_size, logger=logger, is_main_process=is_main_process, preprocessing_batch_size=args.preprocessing_batch_size)
     train_dataloader = DataLoader(
         train_dataset,
         collate_fn=default_data_collator,
@@ -902,7 +921,7 @@ def main():
     if args.validation_file is not None:
         logger.info(f"Loading separate validation file from {args.validation_file}")
         raw_eval_dataset = load_dataset(args.validation_file, split='validation', streaming=True)
-        validation_dataset = build_dataset(raw_eval_dataset, tokenizer, block_size=args.block_size, logger=logger, is_main_process=is_main_process)
+        validation_dataset = build_dataset(raw_eval_dataset, tokenizer, block_size=args.block_size, logger=logger, is_main_process=is_main_process, preprocessing_batch_size=args.preprocessing_batch_size)
         validation_dataloader = DataLoader(
             validation_dataset,
             collate_fn=default_data_collator,
